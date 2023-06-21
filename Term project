@@ -1,0 +1,242 @@
+import pandas as pd
+import os
+
+# Factory Pattern - Book Factory
+class BookFactory:
+    def create_book(self, title, author, publisher, price):
+        raise NotImplementedError()
+
+
+# Factory Pattern - Concrete Book Factory
+class ConcreteBookFactory(BookFactory):
+    def create_book(self, title, author, publisher, price):
+        return Book(title, author, publisher, price)  # Book 객체 생성 후 반환
+
+
+# Strategy Pattern - Selling Strategy Interface
+class SellingStrategy:
+    def sell(self, inventory, book_title):
+        raise NotImplementedError()
+
+
+# Strategy Pattern - Normal Selling Strategy
+class NormalSellingStrategy(SellingStrategy):
+    def sell(self, inventory, book_title):
+        print("일반 판매 전략을 적용하여 도서를 판매합니다.")
+        inventory.sell_book(book_title)
+
+
+# Strategy Pattern - Discount Selling Strategy
+class DiscountSellingStrategy(SellingStrategy):
+    def sell(self, inventory, book_title):
+        print("할인 판매 전략을 적용하여 도서를 판매합니다.")
+        inventory.sell_book(book_title, discount=True)
+
+
+# Observer Pattern - Subject Interface
+class Subject:
+    def attach(self, observer):
+        raise NotImplementedError()
+
+    def detach(self, observer):
+        raise NotImplementedError()
+
+    def notify(self):
+        raise NotImplementedError()
+
+
+# Observer Pattern - Subject Implementation
+class InventorySubject(Subject):
+    def __init__(self):
+        self.observers = []
+
+    def attach(self, observer):
+        self.observers.append(observer)
+
+    def detach(self, observer):
+        self.observers.remove(observer)
+
+    def notify(self):
+        for observer in self.observers:
+            observer.update()
+
+
+# Observer Pattern - Observer Interface
+class Observer:
+    def update(self):
+        raise NotImplementedError()
+
+
+# Observer Pattern - Observer Implementation
+class InventoryObserver(Observer):
+    def __init__(self, inventory):
+        self.inventory = inventory
+
+    def update(self):
+        print("도서 재고 변경 감지됨:")
+        print(self.inventory)
+
+
+class Book:
+    def __init__(self, title, author, publisher, price):
+        self.title = title
+        self.author = author
+        self.publisher = publisher
+        self.price = price
+
+
+class OnlineBookInventorySystem(InventorySubject):
+    def __init__(self, book_factory):
+        super().__init__()
+        self.inventory = pd.DataFrame(columns=['Book Title', 'Author', 'Publisher', 'Price', 'Quantity'])
+        self.book_factory = book_factory
+        self.admin_password = "password"  # Administrator password
+
+    def add_book(self, book_title, author, publisher, price, quantity):
+        book_row = self.inventory[self.inventory['Book Title'] == book_title]
+        if not book_row.empty:
+            # 기존 파일에 같은 책이 있는 경우, 수량만 업데이트
+            self.inventory.loc[self.inventory['Book Title'] == book_title, 'Quantity'] += quantity
+        else:
+            # 새로운 책인 경우, 새로운 도서 추가
+            book = self.book_factory.create_book(book_title, author, publisher, price)
+            new_book = pd.DataFrame(
+                [[book.title, book.author, book.publisher, book.price, quantity]],
+                columns=['Book Title', 'Author', 'Publisher', 'Price', 'Quantity']
+            )
+            self.inventory = pd.concat([self.inventory, new_book], ignore_index=True)
+        self.notify()
+        self.save_inventory_to_excel("C:\\excel test\\list.xlsx")  # 엑셀 파일에 기록
+
+    def remove_book(self, book_title):
+        self.inventory = self.inventory[self.inventory['Book Title'] != book_title]
+        self.notify()
+        self.save_inventory_to_excel("C:\\excel test\\list.xlsx")  # 엑셀 파일에 기록
+
+    def check_quantity(self, book_title):
+        book_row = self.inventory.loc[self.inventory['Book Title'] == book_title]
+        if not book_row.empty:
+            return book_row.iloc[0]['Quantity']
+        else:
+            return 0
+
+
+    def sell_book(self, book_title, quantity=0, discount=False):
+        book_row = self.inventory.loc[self.inventory['Book Title'] == book_title]
+        if not book_row.empty and book_row.iloc[0]['Quantity'] >= quantity:
+            self.inventory.loc[self.inventory['Book Title'] == book_title, 'Quantity'] -= quantity
+            self.notify()
+            if discount:
+                pass
+            self.save_inventory_to_excel("C:\\excel test\\list.xlsx")  # 엑셀 파일에 기록
+            return True
+        else:
+            return False
+
+    def save_inventory_to_excel(self, file_path):
+        self.inventory.to_excel(file_path, index=False)
+
+    def load_inventory_from_excel(self, file_path):
+        self.inventory = pd.read_excel(file_path)
+        self.notify()
+
+    def authenticate_admin(self):
+        password = input("운영자 비밀번호를 입력하세요: ")
+        return password == self.admin_password
+
+
+class BookStoreFacade:
+    def __init__(self, inventory_system):
+        self.inventory_system = inventory_system
+
+    def search_book(self, book_title):
+        book_row = self.inventory_system.inventory.loc[self.inventory_system.inventory['Book Title'] == book_title]
+        if not book_row.empty:
+            print("도서를 찾았습니다:")
+            print(book_row)
+        else:
+            print("도서를 찾을 수 없습니다.")
+
+    def buy_book(self):
+        book_title = input("구매할 도서 제목을 입력하세요: ")
+        quantity = int(input("구매할 도서 수량을 입력하세요: "))
+        is_member = input("회원인 경우 1을, 비회원인 경우 0을 입력하세요: ")
+        if self.inventory_system.sell_book(book_title, quantity):
+            selling_strategy = DiscountSellingStrategy() if bool(int(is_member)) else NormalSellingStrategy()
+            selling_strategy.sell(self.inventory_system, book_title)
+
+            book_row = self.inventory_system.inventory.loc[self.inventory_system.inventory['Book Title'] == book_title]
+            book_price = int(book_row.iloc[0]['Price'])
+            if bool(int(is_member)):
+                discounted_price = int(book_price * 0.9)
+                print(f"10% 할인 적용됨\n도서 '{book_title}' {quantity}권 구매 완료\n가격: {discounted_price}원")
+            else:
+                print(f"도서 '{book_title}' {quantity}권 구매 완료\n가격: {book_price}원")
+        else:
+            print(f"도서 '{book_title}' 재고가 부족합니다.")
+
+    def check_inventory(self, book_title):
+        book_quantity = self.inventory_system.check_quantity(book_title)
+        print(f"도서 '{book_title}' 재고: {book_quantity}")
+
+    def add_book(self, book_title, author, publisher, price, quantity):
+        self.inventory_system.add_book(book_title, author, publisher, price, quantity)
+        print(f"도서 '{book_title}' 추가 완료")
+
+    def remove_book(self, book_title):
+        self.inventory_system.remove_book(book_title)
+        print(f"도서 '{book_title}' 제거 완료")
+
+    def run(self):
+        while True:
+            print("1. 도서 검색")
+            print("2. 책 구매")
+            print("3. 재고 확인")
+            print("4. 도서 추가 (운영자용)")
+            print("5. 도서 제거 (운영자용)")
+            print("0. 종료")
+
+            choice = int(input("원하는 기능을 선택하세요: "))
+
+            if choice == 1:
+                book_title = input("도서 제목을 입력하세요: ")
+                book_store.search_book(book_title)
+            elif choice == 2:
+                book_store.buy_book()
+            elif choice == 3:
+                book_title = input("재고를 확인할 도서 제목을 입력하세요: ")
+                book_store.check_inventory(book_title)
+            elif choice == 4:
+                if inventory_system.authenticate_admin():
+                    book_title = input("추가할 도서 제목을 입력하세요: ")
+                    author = input("저자를 입력하세요: ")
+                    publisher = input("출판사를 입력하세요: ")
+                    price = int(input("가격을 입력하세요: "))
+                    quantity = int(input("수량을 입력하세요: "))
+                    book_store.add_book(book_title, author, publisher, price, quantity)
+                else:
+                    print("운영자 비밀번호 인증에 실패했습니다.")
+            elif choice == 5:
+                if inventory_system.authenticate_admin():
+                    book_title = input("제거할 도서 제목을 입력하세요: ")
+                    book_store.remove_book(book_title)
+                else:
+                    print("운영자 비밀번호 인증에 실패했습니다.")
+            elif choice == 0:
+                break
+            else:
+                print("올바른 선택을 입력하세요.")
+
+
+# 실행
+book_factory = ConcreteBookFactory()
+inventory_system = OnlineBookInventorySystem(book_factory)
+
+# 엑셀 파일에서 도서 정보 불러오기
+inventory_system.load_inventory_from_excel("C:\\excel test\\list.xlsx")
+
+# 온라인
+book_store = BookStoreFacade(inventory_system)
+book_store.run()
+
+
